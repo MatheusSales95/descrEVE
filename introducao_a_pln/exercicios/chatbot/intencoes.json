@@ -1,0 +1,48 @@
+{
+    "intencoes": [
+        {
+            "tag": "saudacao",
+            "padroes": [
+                "oi",
+                "olá",
+                "ola",
+                "bom dia",
+                "boa tarde",
+                "e aí",
+                "eai",
+                "e ai",
+                "tudo bem"
+            ],
+            "respostas": [
+                "Olá! Sou seu assistente meteorológico."
+            ]
+        },
+        {
+            "tag": "ver_clima",
+            "padroes": [
+                "vai chover em",
+                "como está o tempo em",
+                "previsão para",
+                "qual a temperatura em",
+                "tempo em",
+                "clima de",
+                "chove hoje em",
+                "me diga a previsão de"
+            ],
+            "acao": "BUSCAR_DB"
+        },
+        {
+            "tag": "despedida",
+            "padroes": [
+                "tchau",
+                "até logo",
+                "sair",
+                "encerrar"
+            ],
+            "respostas": [
+                "Até mais! Fique atento à chuva!",
+                "Tchau!"
+            ]
+        }
+    ]
+}
