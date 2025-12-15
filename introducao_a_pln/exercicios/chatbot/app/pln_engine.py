@@ -1,37 +1,37 @@
-import json
+import yaml
 import numpy as np
 import joblib
-import random
 from nltk.stem import RSLPStemmer
 from nltk.tokenize import word_tokenize
 from sklearn.neural_network import MLPClassifier
 from unidecode import unidecode
-
-
-MODEL_PATH = "modelo_chatbot.pkl"
-WORDS_PATH = "palavras.pkl"
-CLASSES_PATH = "classes.pkl"
-JSON_FILE = "intencoes.json"
+from .config import settings, get_path  # <--- Importa configurações
 
 stemmer = RSLPStemmer()
+
+# Pegando caminhos do config.yaml
+MODEL_PATH = get_path(settings['nlp']['caminhos']['modelo_pln'])
+WORDS_PATH = get_path(settings['nlp']['caminhos']['vocabulario'])
+CLASSES_PATH = get_path(settings['nlp']['caminhos']['classes'])
+INTENCOES_FILE = get_path(settings['nlp']['caminhos']['intencoes'])
 
 
 def treinar_modelo_pln():
     try:
-        with open(JSON_FILE, 'r', encoding='utf-8') as f:
-            intencoes = json.load(f)
+        # Lê o arquivo de intenções em YAML
+        with open(INTENCOES_FILE, 'r', encoding='utf-8') as f:
+            dados = yaml.safe_load(f)
     except FileNotFoundError:
-        return {"erro": "Arquivo intencoes.json não encontrado."}
+        return {"erro": f"Arquivo '{INTENCOES_FILE}' não encontrado."}
 
     palavras = []
     classes = []
     documentos = []
 
-    for intencao in intencoes['intencoes']:
+    for intencao in dados['intencoes']:
         tag = intencao['tag']
         classes.append(tag)
         for padrao in intencao['padroes']:
-            # Tokeniza e pega a raiz (Stemming)
             w = [stemmer.stem(token.lower()) for token in word_tokenize(
                 padrao, language='portuguese')]
             palavras.extend(w)
@@ -59,25 +59,29 @@ def treinar_modelo_pln():
     X = list(treinamento[:, 0])
     y = list(treinamento[:, 1])
 
-    mlp = MLPClassifier(hidden_layer_sizes=(100, 50),
-                        activation='relu', max_iter=2000, random_state=42)
+    # Usa parâmetros do YAML
+    params = settings['nlp']['parametros']
+    mlp = MLPClassifier(
+        hidden_layer_sizes=tuple(params['hidden_layers']),
+        max_iter=params['max_iter'],
+        activation='relu',
+        random_state=42
+    )
     mlp.fit(X, y)
 
     joblib.dump(mlp, MODEL_PATH)
     joblib.dump(palavras, WORDS_PATH)
     joblib.dump(classes, CLASSES_PATH)
 
-    return {"mensagem": "Modelo atualizado com sucesso!"}
+    return {"mensagem": f"Modelo NLP treinado e salvo em {MODEL_PATH}"}
 
-
-# Função que usada para descobrir o que o usuário quer
 
 def classificar_intencao(comando):
     try:
         mlp = joblib.load(MODEL_PATH)
         palavras = joblib.load(WORDS_PATH)
         classes = joblib.load(CLASSES_PATH)
-    except:
+    except FileNotFoundError:
         return None
 
     frase_stemmed = [stemmer.stem(token.lower()) for token in word_tokenize(
@@ -98,22 +102,18 @@ def classificar_intencao(comando):
 
     return {"tag": tag, "confianca": confianca}
 
-# Função que varre o Banco de Dados e vê se o usuário citou alguma cidade conhecida.
-
 
 def encontrar_localizacao(frase, db_session, model_estacao):
-
-    # Pega todas as cidades cadastradas no banco
     todas_estacoes = db_session.query(model_estacao).all()
     frase_limpa = unidecode(frase.lower())
+
     for estacao in todas_estacoes:
-        # Normalização dos nomes de cidade
         nome_cidade = unidecode(estacao.cidade.lower())
         nome_estado = unidecode(estacao.estado.lower())
 
         if nome_cidade in frase_limpa:
             return estacao
-        # busca simples, se tiver duas cidades no mesmo estado ele pega a primeira que achar
-        if nome_estado in frase_limpa or estacao.estado.lower() in frase_limpa.split():
+        if nome_estado in frase_limpa:
             return estacao
+
     return None

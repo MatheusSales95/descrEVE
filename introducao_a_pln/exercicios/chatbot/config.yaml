@@ -1,0 +1,39 @@
+# ==========================================
+# CONFIGURAÇÃO GERAL DO CHATBOT
+# ==========================================
+
+app:
+  nome: "Assistente Meteorológico"
+  versao: "1.0.0"
+  debug: true
+
+# Configurações do Servidor
+server:
+  host: "127.0.0.1"
+  port: 8000
+
+# ==========================================
+# INTELIGÊNCIA ARTIFICIAL (NLP)
+# ==========================================
+nlp:
+  # Caminhos dos arquivos gerados (Melhor organizar em pastas)
+  caminhos:
+    modelo_pln: "app/data/modelo_chatbot.pkl"
+    vocabulario: "app/data/palavras.pkl"
+    classes: "app/data/classes.pkl"
+    intencoes: "intencoes.yaml"  # Sim! Podemos mudar as intenções para YAML também
+
+  # Parâmetros do Modelo
+  parametros:
+    limite_confianca: 0.70       # Só responde se tiver 70% de certeza
+    idioma: "portuguese"
+    hidden_layers: [100, 50]     # Tamanho da rede neural
+    max_iter: 2000
+
+# ==========================================
+# INTEGRAÇÃO METEOROLÓGICA
+# ==========================================
+clima:
+  cidade_padrao: "São Paulo"     # Fallback se não achar cidade
+  modelo_chuva_path: "app/data/modelo_chuva.pkl"
+  scaler_path: "app/data/escalador.pkl"

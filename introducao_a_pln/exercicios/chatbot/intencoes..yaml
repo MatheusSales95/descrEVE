@@ -1,0 +1,36 @@
+# intencoes.yaml
+intencoes:
+  - tag: "saudacao"
+    padroes:
+      - oi
+      - olá
+      - bom dia
+      - boa tarde
+      - e aí
+      - tudo bem
+    respostas:
+      - Olá! Sou seu assistente meteorológico.
+      - Oi! Em que cidade você está?
+      - Olá! Pode me perguntar sobre o tempo.
+
+  - tag: "ver_clima"
+    acao: "BUSCAR_DB"
+    padroes:
+      - vai chover em
+      - como está o tempo em
+      - previsão para
+      - qual a temperatura em
+      - tempo em
+      - clima de
+      - chove hoje em
+      - me diga a previsão de
+
+  - tag: "despedida"
+    padroes:
+      - tchau
+      - até logo
+      - sair
+      - encerrar
+    respostas:
+      - Até mais! Fique atento à chuva!
+      - Tchau!

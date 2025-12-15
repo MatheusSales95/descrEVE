@@ -1,4 +1,4 @@
-import json
+import yaml
 import random
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,15 +6,19 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from . import models, database, pln_engine, ml_engine
+from .config import settings, get_path  # <--- Importa settings
 
-app = FastAPI(title="Assistente Meteorológico Inteligente")
+app = FastAPI(
+    title=settings['app']['nome'],
+    version=settings['app']['versao']
+)
 
-# CORS permite que o front consuma a API solicitada
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Permite GET, POST, etc.
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -30,8 +34,8 @@ class ClimaInput(BaseModel):
     pressao: float
     vento: float
 
+# Rotas de Treino
 
-# ROTAS DE TREINAMENTO
 
 @app.post("/treinar_bot")
 def treinar_nlp():
@@ -42,100 +46,66 @@ def treinar_nlp():
 def treinar_clima(db: Session = Depends(database.get_db)):
     return ml_engine.treinar_modelo(db)
 
-# ROTA PRINCIPAL (CHATBOT)
+# Rota Chat
 
 
 @app.post("/conversar")
 def conversar(dados: ComandoInput, db: Session = Depends(database.get_db)):
     comando = dados.texto
-
-    # Entender a Intenção (Usando a IA de NLP)
     analise = pln_engine.classificar_intencao(comando)
 
-    # Se a IA não tiver certeza ou falhar
-    if not analise or analise['confianca'] < 0.6:
-        return {"resposta": "Desculpe, não entendi. Tente perguntar sobre o clima de uma cidade específica."}
+    limite_confianca = settings['nlp']['parametros']['limite_confianca']
+
+    if not analise or analise['confianca'] < limite_confianca:
+        return {"resposta": "Desculpe, não entendi. Tente ser mais específico."}
 
     tag = analise['tag']
 
-    # Se for Saudação ou Despedida (Respostas prontas do JSON)
+    # Lê respostas do YAML
+    intencoes_path = get_path(settings['nlp']['caminhos']['intencoes'])
     try:
-        with open("intencoes.json", "r", encoding="utf-8") as f:
-            dados_json = json.load(f)
-            for item in dados_json['intencoes']:
-                if item['tag'] == tag and 'respostas' in item:
+        with open(intencoes_path, "r", encoding="utf-8") as f:
+            dados_yaml = yaml.safe_load(f)
+
+        # Procura a tag no YAML
+        for item in dados_yaml['intencoes']:
+            if item['tag'] == tag:
+                if 'respostas' in item:
                     return {"resposta": random.choice(item['respostas']), "tag": tag}
-    except FileNotFoundError:
-        return {"erro": "Arquivo intencoes.json não encontrado."}
 
-    # Se for Clima, precisamos buscar no banco e usar a IA de Chuva
-    if tag == "ver_clima":
-        # Identifica a cidade na frase
-        estacao = pln_engine.encontrar_localizacao(comando, db, models.Estacao)
+                # Se for ver_clima
+                if item.get('acao') == 'BUSCAR_DB':
+                    estacao = pln_engine.encontrar_localizacao(
+                        comando, db, models.Estacao)
+                    if not estacao:
+                        return {"resposta": "Entendi que quer saber do clima, mas não achei a cidade."}
 
-        if not estacao:
-            return {
-                "resposta": "Entendi que você quer saber do clima, mas não identifiquei a cidade no texto. Tente citar o nome completo, ex: 'Clima em São José dos Campos'.",
-                "tag": tag
-            }
+                    ultima_medicao = db.query(models.Medicao)\
+                        .filter(models.Medicao.estacao_id == estacao.id)\
+                        .order_by(desc(models.Medicao.data_medicao))\
+                        .first()
 
-        # Busca a última medição real dessa estação no banco
-        ultima_medicao = db.query(models.Medicao)\
-            .filter(models.Medicao.estacao_id == estacao.id)\
-            .order_by(desc(models.Medicao.data_medicao))\
-            .first()
+                    if not ultima_medicao:
+                        return {"resposta": "Sem dados para essa cidade."}
 
-        if not ultima_medicao:
-            return {"resposta": f"Encontrei a estação de {estacao.cidade}, mas não há dados de medição cadastrados para ela."}
+                    previsao = ml_engine.prever_agora(
+                        ultima_medicao.temperatura_max, ultima_medicao.temperatura_min,
+                        ultima_medicao.umidade_relativa, ultima_medicao.pressao_atmosferica,
+                        ultima_medicao.velocidade_vento
+                    )
 
-        # Aqui ele precisa dos arquivos .pkl criados no /treinar_chuva
-        previsao_chuva = ml_engine.prever_agora(
-            ultima_medicao.temperatura_max,
-            ultima_medicao.temperatura_min,
-            ultima_medicao.umidade_relativa,
-            ultima_medicao.pressao_atmosferica,
-            ultima_medicao.velocidade_vento
-        )
+                    if not previsao:
+                        return {"resposta": "Erro: Modelo de clima não treinado."}
 
-        if previsao_chuva is None:
-            return {"resposta": "Erro: O modelo de previsão de chuva não foi treinado. Por favor, execute a rota /treinar_chuva primeiro."}
+                    vai_chover = "Sim" if previsao['vai_chover'] else "Não"
 
-        vai_chover = "Sim" if previsao_chuva['vai_chover'] else "Não"
-        confianca = previsao_chuva['confianca']
+                    msg = (f"Análise para {estacao.cidade}:\n"
+                           f"{ultima_medicao.temperatura_min}°C / {ultima_medicao.temperatura_max}°C\n"
+                           f"Previsão de Chuva: {vai_chover}")
 
-        # Monta a resposta
-        resposta_texto = (
-            f"Análise para {estacao.cidade}-{estacao.estado} (Data base: {ultima_medicao.data_medicao}):\n"
-            f"Temperaturas: {ultima_medicao.temperatura_min}°C / {ultima_medicao.temperatura_max}°C\n"
-            f"Umidade: {ultima_medicao.umidade_relativa}%\n"
-            f"Previsão de Chuva p/ dia seguinte: {vai_chover} (Certeza da IA: {confianca})"
-        )
+                    return {"resposta": msg, "dados_tecnicos": previsao}
 
-        return {
-            "resposta": resposta_texto,
-            "dados_tecnicos": {
-                "cidade_id": estacao.id,
-                "lat": estacao.latitude,
-                "previsao_raw": previsao_chuva
-            }
-        }
+    except Exception as e:
+        return {"erro": str(e)}
 
-    return {"resposta": "Não sei como responder isso ainda."}
-
-
-# ROTAS UTILITÁRIAS
-
-@app.get("/estacoes")
-def listar_estacoes(db: Session = Depends(database.get_db)):
-    return db.query(models.Estacao).all()
-
-
-@app.post("/prever_manual")
-def prever_tempo_manual(dados: ClimaInput):
-    """
-    Rota para testar a IA de chuva sem precisar falar com o Chatbot.
-    """
-    return ml_engine.prever_agora(
-        dados.temperatura_max, dados.temperatura_min,
-        dados.umidade, dados.pressao, dados.vento
-    )
+    return {"resposta": "Sem resposta configurada."}
